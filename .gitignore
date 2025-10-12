@@ -1,0 +1,18 @@
+# Node modules
+frontend/node_modules/
+node_modules/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Environment variables
+backend/.env
+frontend/.env
+
+# Large data artifacts
+sentinel-2-scenes/
+*.tif
+
+# Miscellaneous
+*.DS_Store

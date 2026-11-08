@@ -78,9 +78,17 @@ def main():
     f = fleet(per_tank, floating)
     eia = ground_truth.eia_weekly(cache=Path("data/raw/eia_cushing.xls"))
     f["eia_kbbl"] = [ground_truth.value_at(eia, d) for d in f.date]
+    cap = ground_truth.cushing_working_capacity(cache=Path("data/raw/eia_crudeoilstorage.xlsx"))
+    util = [ground_truth.utilization_at(eia, cap, d) for d in f.date]
+    f["eia_util"] = [u for u, _ in util]
+    f["cap_known"] = [k for _, k in util]
     f.to_csv(out / "fleet_vs_eia.csv", index=False)
     print(f.round(3).to_string(index=False))
     if len(f) >= 3:
+        r = np.corrcoef(f.fill, f.eia_util)[0, 1]
+        mae = (f.fill - f.eia_util).abs().mean()
+        print(f"fill vs EIA utilization: r={r:+.2f}  mean |error|={mae:.3f}  "
+              f"(constant-mean baseline {(f.eia_util - f.eia_util.mean()).abs().mean():.3f})")
         for col in ["fill", "volume_index"]:
             r = np.corrcoef(f[col], f.eia_kbbl)[0, 1]
             k, b = np.polyfit(f[col], f.eia_kbbl, 1)

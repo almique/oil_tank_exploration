@@ -34,3 +34,35 @@ def value_at(series: pd.Series, when) -> float:
         s.loc[when] = float("nan")
     s = s.sort_index().interpolate(method="time")
     return float(s.loc[when])
+
+
+EIA_CAPACITY_XLSX = "https://www.eia.gov/petroleum/storagecapacity/crudeoilstorage.xlsx"
+
+
+def cushing_working_capacity(cache: Path | None = None) -> pd.Series:
+    """Cushing tank working storage capacity, thousand bbl, semiannual/annual 2011-03 .. 2024-03.
+
+    From EIA's discontinued Working and Net Available Shell Storage Capacity report.
+    """
+    if cache is None or not cache.exists():
+        r = requests.get(EIA_CAPACITY_XLSX, timeout=60)
+        r.raise_for_status()
+        if cache:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_bytes(r.content)
+        src = r.content if cache is None else cache
+    else:
+        src = cache
+    raw = pd.read_excel(src, sheet_name="Cushing", header=None)
+    dates = pd.to_datetime(raw.iloc[3, 1:], errors="coerce")
+    row = raw[raw[0].astype(str).str.strip() == "Tank Working Storage Capacity"].iloc[0, 1:]
+    s = pd.Series(pd.to_numeric(row.values, errors="coerce"), index=dates).dropna()
+    return s[s.index.notna()].sort_index()
+
+
+def utilization_at(stocks: pd.Series, capacity: pd.Series, when) -> tuple[float, bool]:
+    """EIA stocks / working capacity at `when`. Second value is False if capacity was extrapolated."""
+    when = pd.Timestamp(when)
+    inside = capacity.index.min() <= when <= capacity.index.max()
+    cap = value_at(capacity, when) if inside else float(capacity.iloc[0 if when < capacity.index.min() else -1])
+    return value_at(stocks, when) / cap, inside

@@ -1,6 +1,6 @@
 # Handoff: getting oil_tank_exploration to a working, free-data pipeline
 
-_Status as of 2026-11-07. Research done, pilot code started in `pipeline/` (not yet run end to end)._
+_Status as of 2026-11-08. Pipeline runs end to end on Cushing NAIP 2010-2023; first backtest vs EIA utilization: r=0.88, mean abs error 0.055 (see "Results")._
 
 ## TL;DR
 
@@ -67,45 +67,66 @@ the dark mass just outside each tank.
 Site-level estimate: weight each tank by `diameter^2 * L_out` (proportional to capacity in one image) and
 compare the weighted fleet fill with EIA stocks for the image date.
 
-## Code added on this branch (`free-data-pipeline`)
+## Results (2026-11-08)
 
-| File | State |
+Cushing, 7 NAIP years, floating-roof tanks only, capacity-weighted fleet fill vs EIA utilization
+(weekly stocks / Cushing tank working capacity from EIA's discontinued storage capacity report):
+
+| Image date | GSD | Fleet fill | EIA utilization |
+|---|---|---|---|
+| 2010-05-04 | 1.0 m | 0.86 | 0.76 (capacity extrapolated from 2011-03) |
+| 2013-06-11 | 1.0 m | 0.83 | 0.74 |
+| 2015-06-23 | 1.0 m | 0.79 | 0.78 |
+| 2017-05-07 / 05-08 | 1.0 m | 0.75 / 0.86 | 0.86 |
+| 2019-08-12 | 0.6 m | 0.57 | 0.58 |
+| 2021-05-06 | 0.6 m | 0.50 | 0.60 |
+| 2023-06-15 | 0.3 m | 0.51 | 0.54 |
+
+r = +0.88, mean |error| = 0.055, constant-mean baseline 0.108. No calibration applied.
+Compare with **utilization**, not raw barrels: Cushing capacity grew 58 to 98 M bbl over the period, so
+raw stocks vs fill gives r = 0.39.
+
+Known issues:
+- 1 m years read ~+0.09 high in 2010/2013 (inner shadow harder to see; 2013 flown near noon, outer
+  shadow only ~4.5 m).
+- Floating-roof classification (`max L_in > 1.5 m` over all years) is loose: 332 of 402 tanks.
+- Shadow direction is estimated per tile from dark mass outside tanks; tiles of one flight disagree by ~12 deg.
+- NAIP relief displacement makes some shell walls visible, which inflates `L_out`.
+
+What changed in the method: the original roof-relative dark threshold (`frac=0.45`) flagged most grass
+and soil as shadow and never caught the inner shadow (blue-grey, skylight-lit, brightness ~100-160 vs
+roof ~225). `shadow.measure` now finds the strongest rising brightness edge after each rim on every chord.
+
+## Code on this branch (`free-data-pipeline`)
+
+| File | Purpose |
 |---|---|
-| `pipeline/tanks.py` | OSM fetch and diameter/circularity filter. Ran OK (402 Cushing tanks). |
-| `pipeline/ground_truth.py` | EIA download and interpolation to a date. Download verified; function not unit-tested. |
-| `pipeline/shadow.py` | Fill-from-shadow measurement. **Written, not yet validated.** |
-| `pipeline/naip.py` | Pull chips per tank from every NAIP tile and run `shadow.measure`. **First run was stopped before finishing.** |
+| `pipeline/tanks.py` | OSM fetch and diameter/circularity filter (402 Cushing tanks). |
+| `pipeline/ground_truth.py` | EIA weekly Cushing stocks, Cushing working capacity, utilization at a date. |
+| `pipeline/shadow.py` | Edge-based fill-from-shadow measurement per tank chip. |
+| `pipeline/naip.py` | NAIP STAC search, chip extraction per tank, per-tile measurement. |
+| `pipeline/cache_chips.py` | `python -m pipeline.cache_chips --year 2023` caches chips to `data/chips/<year>/` (~2-3 min/year; 2023 is 600 MB). |
+| `pipeline/debug.py` | `python -m pipeline.debug data/chips/2023 --out data/debug/x.png`: overlays, stats, repeatability on overlapping tiles. |
+| `pipeline/backtest.py` | `python -m pipeline.backtest data/chips`: all years, floating classification, fleet fill vs EIA. Caches `data/backtest/per_tank_<year>.csv`; delete those after changing `shadow.py`. |
+
+`data/` is gitignored; everything in it can be regenerated.
 
 Setup (macOS x86_64 note: Python 3.14 and newest rasterio don't have wheels; this worked):
 ```bash
 python3.12 -m venv .venv-pipeline && . .venv-pipeline/bin/activate
 pip install --only-binary=:all: "rasterio==1.3.11"
-pip install pystac-client planetary-computer numpy pandas scipy shapely pyproj requests xlrd matplotlib scikit-image
-```
-
-Run (what was in progress):
-```python
-from pathlib import Path
-from pipeline import tanks, naip
-el = tanks.fetch_osm_tanks((35.90, -96.85, 36.02, -96.68), cache=Path("data/raw/osm_cushing.json"))
-df = tanks.tanks_dataframe(el)
-res = naip.measure_site(df, [-96.85, 35.90, -96.68, 36.02], years={2023})
+pip install pystac-client planetary-computer numpy pandas scipy shapely pyproj requests xlrd openpyxl matplotlib scikit-image
 ```
 
 ## Next steps, in order
 
 1. ~~Security cleanup~~ done (2026-11-07).
-2. **Validate the shadow method on Cushing NAIP 2023** (0.3 m): render debug overlays (fitted rim,
-   shadow mask, chords) for ~20 tanks and eyeball. Tune `shadow_mask` threshold (`frac=0.45`), and
-   check that shadow direction is estimated per tile, not globally.
-3. **Classify floating vs fixed roof:** mark a tank as floating if any year shows `L_in > ~1 m`.
-   Fixed roofs otherwise read as "100% full".
+2. ~~Validate the shadow method on Cushing NAIP 2023~~ done (edge-based rewrite, see Results).
+3. **Classify floating vs fixed roof:** currently `max L_in > 1.5 m` over all years (too loose, 332/402).
+   Use only the sub-metre years (2019-2023) and/or roof texture. Fixed roofs otherwise read as "100% full".
 4. **Handle tanks that didn't exist yet** in older years: require a detected outer shadow
    (`ok == True`) before counting a tank.
-5. **Backtest:** run all 8 NAIP years, compute the weighted fleet fill per year, and compare with EIA
-   Cushing on those dates (correlation and error after linear calibration). Only 8 points, so this is a
-   sanity check, not proof. Watch for NAIP relief displacement (tank tops lean up to a few metres at
-   frame edges) as a known error source.
+5. ~~Backtest~~ first pass done (r=0.88 vs utilization over 7 dates). Rerun after steps 3-4.
 6. **Port the same code to Houston/Corpus Christi** (also NAIP, also EIA PADD 3 data) for more points.
 7. **Dense time series (free):** try Umbra Open Data at Rotterdam/Antwerp (double-bounce method) vs
    Insights Global ARA weekly stocks. Then decide whether Sentinel-1 SLC is worth the processing cost.

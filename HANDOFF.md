@@ -15,9 +15,8 @@ _Status as of 2026-11-07. Research done, pilot code started in `pipeline/` (not 
      Singapore ports; CC BY 4.0).
    - Global free radar: **Sentinel-1** (every 6–12 days), accuracy for fill is **unproven**.
    - Free ground truth: **EIA weekly Cushing stocks** (no API key).
-4. **Security, do first:** `backend/.env` is committed with what look like real NASA Earthdata and
-   Copernicus credentials. Rotate both passwords, `git rm --cached backend/.env frontend/.env`,
-   add `.env.example` files, and purge history (e.g. `git filter-repo`).
+4. **Config:** `.env` files are untracked; copy `backend/.env.example` and `frontend/.env.example`
+   to `.env` and fill in locally. Never commit `.env`.
 
 ## Will this cover every tank in the world?
 
@@ -95,7 +94,7 @@ res = naip.measure_site(df, [-96.85, 35.90, -96.68, 36.02], years={2023})
 
 ## Next steps, in order
 
-1. **Security:** rotate leaked credentials and remove `.env` files from git and history.
+1. ~~Security cleanup~~ done (2026-11-07).
 2. **Validate the shadow method on Cushing NAIP 2023** (0.3 m): render debug overlays (fitted rim,
    shadow mask, chords) for ~20 tanks and eyeball. Tune `shadow_mask` threshold (`frac=0.45`), and
    check that shadow direction is estimated per tile, not globally.

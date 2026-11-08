@@ -19,7 +19,8 @@ from .sites import SITES
 FLOATING_MIN_LIN_M = 1.5      # inner shadow longer than this => roof sits below the rim
 SMOOTH_TEX = 4.0              # roof texture below this => fixed (cone/dome) roof
 TEXTURED = 8.0                # roof texture above this => floating roof even if never seen below rim
-SUBMETRE = 0.75               # only trust inner-shadow / texture evidence at GSD <= this
+SUBMETRE = 0.75               # only trust inner-shadow evidence at GSD <= this
+TEXTURE_MAX_GSD = 0.4         # texture thresholds were tuned at 0.3 m and do not transfer to 0.6 m
 
 
 def roof_textures(chips_root: Path) -> pd.Series:
@@ -28,7 +29,7 @@ def roof_textures(chips_root: Path) -> pd.Series:
     tex = {}
     for yd in reversed(years):
         for c in load(yd):
-            if c["gsd"] > SUBMETRE or int(c["osm_id"]) in tex:
+            if c["gsd"] > TEXTURE_MAX_GSD or int(c["osm_id"]) in tex:
                 continue
             tex[int(c["osm_id"])] = shadow.roof_texture(c["chip"], c["cx"], c["cy"], c["r"], c["gsd"])
         if tex:
@@ -39,7 +40,7 @@ def roof_textures(chips_root: Path) -> pd.Series:
 def classify_floating(per_tank: pd.DataFrame, texture: pd.Series) -> set[int]:
     hi = per_tank[per_tank.ok & (per_tank.gsd <= SUBMETRE)]
     lin = hi.groupby("osm_id").l_in_m.max()
-    d = pd.concat([lin.rename("lin"), texture], axis=1)
+    d = pd.concat([lin.rename("lin"), texture.reindex(lin.index.union(texture.index))], axis=1)
     shadow_seen = d.lin > FLOATING_MIN_LIN_M
     floating = (d.texture >= TEXTURED) | (shadow_seen & ~(d.texture < SMOOTH_TEX))
     return set(d.index[floating.fillna(False)])

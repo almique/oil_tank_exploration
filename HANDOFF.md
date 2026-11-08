@@ -127,7 +127,13 @@ pip install pystac-client planetary-computer numpy pandas scipy shapely pyproj r
 4. **Handle tanks that didn't exist yet** in older years: require a detected outer shadow
    (`ok == True`) before counting a tank.
 5. ~~Backtest~~ first pass done (r=0.88 vs utilization over 7 dates). Rerun after steps 3-4.
-6. **Port the same code to Houston/Corpus Christi** (also NAIP, also EIA PADD 3 data) for more points.
+6. ~~Port to Houston/Corpus Christi~~ ran (2026-11-08), **inconclusive**: fleet fill vs EIA PADD 3 utilization
+   r=+0.01 (Houston, 176 floating) and r=-0.14 (Corpus Christi, 118 floating). The benchmark is the problem:
+   PADD 3 utilization barely moves (std ~0.04) and mixes refinery tanks, salt caverns and pipeline fill
+   across the whole Gulf Coast, while these tanks also hold products/chemicals. Neither validates nor refutes.
+   Also: Texas NAIP is 0.6 m at best (texture veto only applied at <= 0.4 m); Houston 2012-06-01 was flown
+   with the sun near zenith (42/1425 chips usable); partial-tile dates (n < ~30) should be pooled per flight.
+   Better Gulf Coast truth would need a single crude-only terminal with published inventory.
 7. **Dense time series (free):** try Umbra Open Data at Rotterdam/Antwerp (double-bounce method) vs
    Insights Global ARA weekly stocks. Then decide whether Sentinel-1 SLC is worth the processing cost.
 8. **Fix the existing backend** (or replace `vision_service.py` with `pipeline/shadow.py`):

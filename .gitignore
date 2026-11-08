@@ -16,3 +16,7 @@ sentinel-2-scenes/
 
 # Miscellaneous
 *.DS_Store
+
+# free-data pipeline
+.venv-pipeline/
+data/

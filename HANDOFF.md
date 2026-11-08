@@ -109,7 +109,10 @@ roof ~225). `shadow.measure` now finds the strongest rising brightness edge afte
 | `pipeline/debug.py` | `python -m pipeline.debug data/chips/cushing/2023 --out data/debug/x.png`: overlays, stats, repeatability on overlapping tiles. |
 | `pipeline/backtest.py` | `python -m pipeline.backtest --site cushing`: all years, floating classification, fleet fill vs EIA. Caches `data/backtest/<site>/per_tank_<year>.csv` and `roof_texture.csv`; delete those after changing `shadow.py`. |
 
-`data/` is gitignored; everything in it can be regenerated.
+| `pipeline/export_dashboard.py` | `python -m pipeline.export_dashboard` writes `dashboard/data.js` from the backtest outputs (pooled per NAIP year). |
+| `dashboard/index.html` | Static dashboard (no server, no DB): tank map coloured by fill, fleet fill vs EIA weekly utilization, data table. Open the file directly; URL options `?site=houston&year=2018&theme=dark`. |
+
+`data/` is gitignored; everything in it can be regenerated. `dashboard/data.js` is committed so the page opens without running the pipeline.
 
 Setup (macOS x86_64 note: Python 3.14 and newest rasterio don't have wheels; this worked):
 ```bash

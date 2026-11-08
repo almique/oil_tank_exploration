@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tank Fill Monitor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-2: #f3f2ef;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6;  /* measured fleet fill */
+  --series-2: #eb6834;  /* EIA utilization */
+  --fixed: #a8a69e;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --accent-wash: rgba(42,120,214,0.10);
+  --shadow: 0 1px 2px rgba(11,11,11,0.04), 0 4px 16px rgba(11,11,11,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --fixed: #6b6a65;
+    --accent-wash: rgba(57,135,229,0.14);
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #232321;
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255,255,255,0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --fixed: #6b6a65;
+  --accent-wash: rgba(57,135,229,0.14);
+  --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  overflow-x: hidden;
+  background: var(--page);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--text-2); margin-top: 2px; }
+.gen { color: var(--muted); font-size: 12px; }
+
+.filters { display: flex; gap: 12px 20px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.filter { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.filter > span { color: var(--muted); font-size: 12px; font-weight: 500; }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 8px; padding: 3px; gap: 2px; flex-wrap: wrap; max-width: 100%; }
+.seg button {
+  font: inherit; font-size: 13px; color: var(--text-2); background: transparent; border: 0;
+  padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+.seg button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+.banner {
+  display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); margin-bottom: 16px;
+}
+.banner .icon { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #fff; margin-top: 1px; }
+.banner.validated .icon { background: var(--good); }
+.banner.inconclusive .icon { background: var(--warning); color: #0b0b0b; }
+.banner strong { font-weight: 600; }
+.banner .detail { color: var(--text-2); }
+
+.tiles { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+.tile .label { color: var(--text-2); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; letter-spacing: -0.01em; }
+.tile.hero .value { font-size: 48px; line-height: 1.05; }
+.tile .note { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); min-width: 0; }
+.card-h { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px 0; flex-wrap: wrap; }
+.card-h h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.card-h .hint { color: var(--muted); font-size: 12px; }
+.card-b { padding: 12px 16px 16px; }
+
+#map { height: 520px; border-radius: 8px; background: var(--surface-2); z-index: 0; }
+.leaflet-container { font: inherit; }
+.map-legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-top: 10px; color: var(--text-2); font-size: 12px; }
+.ramp { display: inline-flex; align-items: center; gap: 6px; }
+.ramp i { display: inline-block; width: 120px; height: 8px; border-radius: 4px; }
+.swatch { display: inline-flex; align-items: center; gap: 6px; }
+.swatch i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+#chart { position: relative; }
+#chart svg { display: block; width: 100%; overflow: visible; }
+#chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 150px; opacity: 0; transition: opacity .08s; z-index: 5;
+}
+.tip .d { color: var(--muted); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 8px; }
+.tip .row b { font-weight: 650; min-width: 38px; }
+.tip .row span:last-child { color: var(--text-2); }
+
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+tr.sel td { background: var(--accent-wash); }
+td.dim { color: var(--muted); }
+.table-scroll { overflow-x: auto; }
+
+#tank { margin-top: 16px; }
+#tank .empty { color: var(--muted); }
+#tank h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+#tank .meta { color: var(--text-2); font-size: 13px; }
+#tank a { color: var(--series-1); }
+#spark { margin-top: 8px; }
+#spark svg { display: block; width: 100%; }
+#spark text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+.method { margin-top: 16px; }
+.method ul { margin: 0; padding-left: 18px; color: var(--text-2); }
+.method li { margin: 4px 0; }
+.method a { color: var(--series-1); }
+
+@media (max-width: 960px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #map { height: 420px; }
+}
+@media (max-width: 520px) {
+  .tile.hero .value { font-size: 40px; }
+  .tile .value { font-size: 24px; }
+  #map { height: 360px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Tank Fill Monitor</h1>
+      <div class="sub">Floating-roof fill measured from shadows in free NAIP aerial imagery, compared with EIA.</div>
+    </div>
+    <div class="gen" id="gen"></div>
+  </header>
+
+  <div class="filters" role="toolbar" aria-label="Filters">
+    <div class="filter"><span>Site</span><div class="seg" id="siteSeg"></div></div>
+    <div class="filter"><span>Year</span><div class="seg" id="yearSeg"></div></div>
+  </div>
+
+  <div class="banner" id="banner" role="status"></div>
+
+  <section class="tiles" aria-label="Selected year">
+    <div class="tile hero"><div class="label"><i class="dot" style="background:var(--series-1)"></i>Measured fleet fill</div><div class="value" id="tFill">–</div><div class="note" id="tFillNote"></div></div>
+    <div class="tile"><div class="label"><i class="key" style="background:var(--series-2)"></i>EIA utilization</div><div class="value" id="tEia">–</div><div class="note" id="tEiaNote"></div></div>
+    <div class="tile"><div class="label">Difference</div><div class="value" id="tDiff">–</div><div class="note">measured minus EIA</div></div>
+    <div class="tile"><div class="label">Tanks measured</div><div class="value" id="tN">–</div><div class="note" id="tNNote"></div></div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <div class="card-h">
+        <h2 id="mapTitle">Tanks</h2>
+        <div class="seg" id="baseSeg" aria-label="Basemap">
+          <button data-base="map" aria-pressed="true">Map</button>
+          <button data-base="sat" aria-pressed="false">Satellite</button>
+        </div>
+      </div>
+      <div class="card-b">
+        <div id="map" role="application" aria-label="Map of tanks coloured by fill"></div>
+        <div class="map-legend">
+          <span class="ramp">Empty <i id="rampBar"></i> Full</span>
+          <span class="swatch"><i style="background:var(--fixed)"></i>Fixed roof (not measurable)</span>
+          <span class="swatch"><i style="border:1.5px solid var(--muted)"></i>No reading this year</span>
+        </div>
+        <div id="tank"><div class="empty">Select a tank on the map to see its fill history.</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <h2>Fleet fill vs EIA utilization</h2>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--series-1)"></i>Measured (NAIP)</span>
+          <span><i class="key" style="background:var(--series-2)"></i>EIA weekly</span>
+        </div>
+      </div>
+      <div class="card-b">
+        <div id="chart"><div class="tip" id="tip"></div></div>
+        <details open>
+          <summary>Data table</summary>
+          <div class="table-scroll"><table id="table"></table></div>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <section class="card method">
+    <div class="card-h"><h2>How this is measured</h2></div>
+    <div class="card-b">
+      <ul>
+        <li>A floating roof sits on the oil. The tank wall casts a shadow outside the tank (length set by wall height and sun angle) and another onto the roof (length set by how far the roof sits below the rim). Fill = 1 − inner ÷ outer; sun angle and tank height cancel.</li>
+        <li>Fleet fill weights each floating-roof tank by its capacity. Fixed-roof tanks can't be measured this way and are excluded.</li>
+        <li>EIA utilization = weekly crude stocks ÷ working storage capacity (EIA storage capacity report, 2011–2024). Cushing compares one hub with itself; Gulf Coast sites only have region-wide EIA data, so their comparison is not a real test.</li>
+        <li>* EIA capacity data starts in March 2011, so earlier utilization uses the 2011 capacity.</li>
+        <li>Years with fewer than 30 measured tanks are shown hollow and left out of the statistics. NAIP flights near noon (short shadows) and 1 m imagery are less reliable.</li>
+        <li>Sources: <a href="https://planetarycomputer.microsoft.com/dataset/naip" target="_blank" rel="noopener">NAIP on Microsoft Planetary Computer</a>, <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> tank outlines, <a href="https://www.eia.gov/petroleum/storagecapacity/" target="_blank" rel="noopener">EIA storage capacity</a>, EIA weekly stocks.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="data.js"></script>
+<script>
+(() => {
+  const D = window.TANK_DATA;
+  const qTheme = new URLSearchParams(location.search).get("theme");
+  if (qTheme === "light" || qTheme === "dark") document.documentElement.dataset.theme = qTheme;
+  const $ = (id) => document.getElementById(id);
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const pct = (x) => x == null ? "–" : Math.round(x * 100) + "%";
+  const pts = (d) => { const v = Math.round(d * 100); return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + " pts"; };
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, parent) => {
+    const n = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
+  const MIN_N = 30;
+
+  // sequential blue ramp (steps 150 -> 650): empty = light, full = dark
+  const RAMP = ["#b7d3f6", "#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"];
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const rampColor = (t) => {
+    t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1);
+    const i = Math.min(RAMP.length - 2, Math.floor(t)), f = t - i;
+    const a = hex(RAMP[i]), b = hex(RAMP[i + 1]);
+    return "rgb(" + a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(",") + ")";
+  };
+  $("rampBar").style.background = "linear-gradient(90deg," + RAMP.join(",") + ")";
+  $("gen").textContent = "Data generated " + D.generated;
+
+  const state = { site: D.sites[0], year: null, tank: null, base: "map" };
+
+  // ---------- map ----------
+  const map = L.map("map", { zoomControl: true, attributionControl: true, preferCanvas: true, maxZoom: 19 });
+  const darkMode = () => matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.dataset.theme !== "light"
+    || document.documentElement.dataset.theme === "dark";
+  const bases = {
+    map: () => L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/" + (darkMode() ? "World_Dark_Gray_Base" : "World_Light_Gray_Base") + "/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 16, attribution: "Basemap &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors" }),
+    sat: () => L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics" }),
+  };
+  let baseLayer = bases.map().addTo(map);
+  const tankLayer = L.layerGroup().addTo(map);
+  let markers = [];
+
+  $("baseSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.base = b.dataset.base;
+    $("baseSeg").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    map.removeLayer(baseLayer); baseLayer = bases[state.base]().addTo(map); baseLayer.bringToBack();
+  });
+
+  const pxRadius = (dM, lat) => {
+    const mpp = 40075016.686 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
+    return Math.max(3, dM / 2 / mpp);
+  };
+
+  function styleFor(t) {
+    const [id, lat, lon, d, roof] = t;
+    const f = (state.site.fills[state.year] || {})[id];
+    const ring = state.base === "sat" ? "#ffffff" : css("--surface");
+    if (roof !== "floating") return { radius: pxRadius(d, lat), color: ring, weight: 1, fillColor: css("--fixed"), fillOpacity: 0.9 };
+    if (f == null) return { radius: pxRadius(d, lat), color: css("--muted"), weight: 1.5, fillOpacity: 0 };
+    return { radius: pxRadius(d, lat), color: id === state.tank ? css("--text") : ring, weight: id === state.tank ? 2.5 : 1, fillColor: rampColor(f), fillOpacity: 0.95 };
+  }
+
+  function drawTanks(fit) {
+    tankLayer.clearLayers(); markers = [];
+    for (const t of state.site.tanks) {
+      const m = L.circleMarker([t[1], t[2]], styleFor(t));
+      m.on("click", () => { state.tank = t[0]; restyle(); drawTank(); });
+      m.bindTooltip(() => {
+        const f = (state.site.fills[state.year] || {})[t[0]];
+        const roofTxt = t[4] === "floating" ? (f == null ? "no reading in " + state.year : pct(f) + " full in " + state.year) : (t[4] === "fixed" ? "fixed roof" : "not observed");
+        const div = document.createElement("div");
+        div.textContent = Math.round(t[3]) + " m tank · " + roofTxt;
+        return div;
+      }, { direction: "top", offset: [0, -4] });
+      m.addTo(tankLayer); markers.push([m, t]);
+    }
+    if (fit) map.fitBounds(L.latLngBounds(state.site.tanks.map((t) => [t[1], t[2]])), { padding: [24, 24] });
+  }
+  const restyle = () => markers.forEach(([m, t]) => m.setStyle(styleFor(t)));
+  map.on("zoomend", restyle);
+
+  // ---------- tank detail ----------
+  function drawTank() {
+    const box = $("tank"); box.replaceChildren();
+    const t = state.site.tanks.find((x) => x[0] === state.tank);
+    if (!t) { const e = document.createElement("div"); e.className = "empty"; e.textContent = "Select a tank on the map to see its fill history."; box.appendChild(e); return; }
+    const h = document.createElement("h3"); h.textContent = (t[4] === "floating" ? "Floating-roof tank" : t[4] === "fixed" ? "Fixed-roof tank" : "Tank (not observed)") + " · " + Math.round(t[3]) + " m";
+    const meta = document.createElement("div"); meta.className = "meta";
+    const a = document.createElement("a"); a.href = "https://www.openstreetmap.org/way/" + t[0]; a.target = "_blank"; a.rel = "noopener"; a.textContent = "OSM way " + t[0];
+    meta.append(a, document.createTextNode(" · " + t[1].toFixed(4) + ", " + t[2].toFixed(4)));
+    box.append(h, meta);
+    if (t[4] !== "floating") return;
+    const pts = state.site.years.map((y) => [y.year, (state.site.fills[y.year] || {})[t[0]]]);
+    const sp = document.createElement("div"); sp.id = "spark"; box.appendChild(sp);
+    const W = sp.clientWidth || 400, H = 90, P = { l: 34, r: 10, t: 8, b: 20 };
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Fill per year: " + pts.map(([y, f]) => y + " " + pct(f)).join(", ") }, sp);
+    const yrs = pts.map((p) => p[0]), x0 = Math.min(...yrs), x1 = Math.max(...yrs);
+    const X = (y) => P.l + (y - x0) / Math.max(1, x1 - x0) * (W - P.l - P.r), Y = (v) => P.t + (1 - v) * (H - P.t - P.b);
+    [0, 0.5, 1].forEach((v) => { el("line", { x1: P.l, x2: W - P.r, y1: Y(v), y2: Y(v), stroke: css("--grid") }, svg); const tx = el("text", { x: P.l - 6, y: Y(v) + 4, "text-anchor": "end" }, svg); tx.textContent = pct(v); });
+    const valid = pts.filter((p) => p[1] != null);
+    if (valid.length > 1) el("path", { d: valid.map((p, i) => (i ? "L" : "M") + X(p[0]) + " " + Y(p[1])).join(""), fill: "none", stroke: css("--series-1"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    pts.forEach(([y, f]) => {
+      const tx = el("text", { x: X(y), y: H - 4, "text-anchor": "middle" }, svg); tx.textContent = y;
+      if (f != null) el("circle", { cx: X(y), cy: Y(f), r: y == state.year ? 5.5 : 4, fill: css("--series-1"), stroke: css("--surface"), "stroke-width": 2 }, svg);
+    });
+  }
+
+  // ---------- chart ----------
+  function drawChart() {
+    const box = $("chart"); box.querySelectorAll("svg").forEach((s) => s.remove());
+    const s = state.site, W = Math.max(300, box.clientWidth), H = W < 520 ? 280 : 380, P = { l: 40, r: 16, t: 12, b: 28 };
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Measured fleet fill and EIA utilization over time; values in the data table below." });
+    box.insertBefore(svg, $("tip"));
+    const t = (d) => new Date(d + "T00:00:00Z").getTime();
+    const all = s.eia_weekly.map((p) => t(p[0])).concat(s.years.map((y) => t(y.date)));
+    const tx0 = Math.min(...all) - 90 * 864e5, tx1 = Math.max(...all) + 90 * 864e5;
+    const X = (ms) => P.l + (ms - tx0) / (tx1 - tx0) * (W - P.l - P.r);
+    const Y = (v) => P.t + (1 - v) * (H - P.t - P.b);
+    [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
+      el("line", { x1: P.l, x2: W - P.r, y1: Y(v), y2: Y(v), stroke: v === 0 ? css("--axis") : css("--grid") }, svg);
+      const l = el("text", { x: P.l - 8, y: Y(v) + 4, "text-anchor": "end" }, svg); l.textContent = pct(v);
+    });
+    const y0 = new Date(tx0).getUTCFullYear() + 1, y1 = new Date(tx1).getUTCFullYear();
+    const stepY = W < 520 ? 4 : 2;
+    for (let y = y0; y <= y1; y++) {
+      if ((y - y0) % stepY) continue;
+      const xx = X(Date.UTC(y, 0, 1));
+      const l = el("text", { x: xx, y: H - 8, "text-anchor": "middle" }, svg); l.textContent = y;
+    }
+    // EIA weekly line (gaps where capacity is unknown are already excluded)
+    const wk = s.eia_weekly.filter((p) => p[1] != null);
+    el("path", { d: wk.map((p, i) => (i ? "L" : "M") + X(t(p[0])).toFixed(1) + " " + Y(p[1]).toFixed(1)).join(""), fill: "none", stroke: css("--series-2"), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    // selected-year guide
+    const sel = s.years.find((y) => y.year == state.year);
+    if (sel) el("line", { x1: X(t(sel.date)), x2: X(t(sel.date)), y1: P.t, y2: H - P.b, stroke: css("--axis") }, svg);
+    // measured points
+    s.years.forEach((y) => {
+      const low = y.n < MIN_N, cx = X(t(y.date)), cy = Y(y.fill), isSel = y.year == state.year;
+      el("circle", { cx, cy, r: isSel ? 7 : 5, fill: low ? css("--surface") : css("--series-1"), stroke: low ? css("--series-1") : css("--surface"), "stroke-width": 2 }, svg);
+      const hit = el("circle", { cx, cy, r: 14, fill: "transparent", tabindex: 0, role: "button", "aria-label": y.year + ": measured " + pct(y.fill) + ", EIA " + pct(y.eia), style: "cursor:pointer" }, svg);
+      hit.addEventListener("click", () => setYear(y.year));
+      hit.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setYear(y.year); } });
+    });
+    if (sel) {
+      const lx = X(t(sel.date)), right = lx > W - 90;
+      const lab = el("text", { x: right ? lx - 12 : lx + 12, y: Y(sel.fill) - 10, "text-anchor": right ? "end" : "start", style: "fill:var(--text);font-weight:600;font-size:12px" }, svg);
+      lab.textContent = sel.year + " · " + pct(sel.fill);
+    }
+    // crosshair + tooltip
+    const cross = el("line", { y1: P.t, y2: H - P.b, stroke: css("--muted"), "stroke-width": 1, opacity: 0 }, svg);
+    const ov = el("rect", { x: P.l, y: P.t, width: W - P.l - P.r, height: H - P.t - P.b, fill: "transparent" }, svg);
+    svg.appendChild(ov); // keep overlay under hit circles? put hit circles above:
+    svg.querySelectorAll("circle[tabindex]").forEach((c) => svg.appendChild(c));
+    const tip = $("tip");
+    const move = (ev) => {
+      const r = svg.getBoundingClientRect(), mx = (ev.clientX - r.left) * W / r.width;
+      const ms = tx0 + (mx - P.l) / (W - P.l - P.r) * (tx1 - tx0);
+      let best = null, bd = Infinity;
+      for (const p of wk) { const d = Math.abs(t(p[0]) - ms); if (d < bd) { bd = d; best = p; } }
+      let meas = null, md = Infinity;
+      for (const y of s.years) { const d = Math.abs(t(y.date) - ms); if (d < md) { md = d; meas = y; } }
+      const near = meas && md < 75 * 864e5 ? meas : null;
+      const xd = near ? t(near.date) : best ? t(best[0]) : ms;
+      cross.setAttribute("x1", X(xd)); cross.setAttribute("x2", X(xd)); cross.setAttribute("opacity", 1);
+      tip.replaceChildren();
+      const d = document.createElement("div"); d.className = "d";
+      d.textContent = new Date(xd).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+      tip.appendChild(d);
+      const row = (color, val, name, dot) => {
+        const r = document.createElement("div"); r.className = "row";
+        const k = document.createElement("i"); k.className = dot ? "dot" : "key"; k.style.background = color;
+        const b = document.createElement("b"); b.textContent = val;
+        const n = document.createElement("span"); n.textContent = name;
+        r.append(k, b, n); tip.appendChild(r);
+      };
+      if (near) row(css("--series-1"), pct(near.fill), "measured, " + near.n + " tanks" + (near.n < MIN_N ? " (too few)" : ""), true);
+      const eiaAt = near ? near.eia : best && best[1];
+      if (eiaAt != null) row(css("--series-2"), pct(eiaAt), "EIA utilization", false);
+      const bx = box.getBoundingClientRect(), px = (X(xd) / W) * r.width + (r.left - bx.left);
+      tip.style.opacity = 1;
+      const tw = tip.offsetWidth;
+      tip.style.left = Math.min(bx.width - tw, Math.max(0, px + 12 + tw > bx.width ? px - tw - 12 : px + 12)) + "px";
+      tip.style.top = "12px";
+    };
+    svg.addEventListener("pointermove", move);
+    svg.addEventListener("pointerleave", () => { tip.style.opacity = 0; cross.setAttribute("opacity", 0); });
+  }
+
+  function drawTable() {
+    const tb = $("table"); tb.replaceChildren();
+    const head = tb.insertRow();
+    ["Year", "Image date", "Resolution", "Tanks", "Measured", "EIA", "Diff"].forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+    state.site.years.forEach((y) => {
+      const r = tb.insertRow(); if (y.year == state.year) r.className = "sel";
+      const diff = y.eia == null ? "–" : pts(y.fill - y.eia);
+      [y.year, y.date, y.gsd + " m", y.n, pct(y.fill), pct(y.eia) + (y.cap_known ? "" : "*"), diff].forEach((v, i) => {
+        const td = r.insertCell(); td.textContent = v; if (y.n < MIN_N && i > 2) td.className = "dim";
+      });
+    });
+  }
+
+  // ---------- header bits ----------
+  function drawBanner() {
+    const s = state.site, b = $("banner"); b.className = "banner " + s.status; b.replaceChildren();
+    const ic = document.createElement("div"); ic.className = "icon"; ic.setAttribute("aria-hidden", "true"); ic.textContent = s.status === "validated" ? "✓" : "!";
+    const txt = document.createElement("div");
+    const st = document.createElement("strong"); st.textContent = s.status_text + ". ";
+    const det = document.createElement("span"); det.className = "detail";
+    det.textContent = s.stats
+      ? "Correlation r = " + s.stats.r.toFixed(2) + " · mean error " + (s.stats.mae * 100).toFixed(1) + " pts (a flat guess scores " + (s.stats.baseline * 100).toFixed(1) + ") · " + s.stats.n + " NAIP years, uncalibrated."
+      : "Not enough years to compare.";
+    txt.append(st, det); b.append(ic, txt);
+  }
+
+  function drawTiles() {
+    const s = state.site, y = s.years.find((v) => v.year == state.year);
+    $("tFill").textContent = pct(y.fill);
+    $("tFillNote").textContent = y.date + " · " + y.gsd + " m imagery";
+    $("tEia").textContent = pct(y.eia);
+    $("tEiaNote").textContent = "EIA " + (s.id === "cushing" ? "Cushing" : "Gulf Coast (PADD 3)") + (y.cap_known ? "" : " · capacity extrapolated");
+    const d = y.fill - y.eia;
+    $("tDiff").textContent = pts(d);
+    $("tN").textContent = y.n;
+    $("tNNote").textContent = "of " + s.counts.floating + " floating-roof · " + s.counts.total + " tanks total" + (y.n < MIN_N ? " · too few to trust" : "");
+    $("mapTitle").textContent = s.label + " · " + y.year;
+  }
+
+  function segButtons(box, items, cur, onPick) {
+    box.replaceChildren();
+    items.forEach(([val, label]) => {
+      const b = document.createElement("button"); b.textContent = label; b.setAttribute("aria-pressed", String(val == cur));
+      b.addEventListener("click", () => onPick(val)); box.appendChild(b);
+    });
+  }
+
+  function setYear(y) { state.year = y; render(false); }
+  function setSite(id) {
+    state.site = D.sites.find((s) => s.id === id);
+    const good = state.site.years.filter((y) => y.n >= MIN_N);
+    state.year = (good.length ? good : state.site.years).at(-1).year;
+    state.tank = null; render(true);
+  }
+  function render(siteChanged) {
+    segButtons($("siteSeg"), D.sites.map((s) => [s.id, s.label.split(",")[0].replace(" Ship Channel", "")]), state.site.id, setSite);
+    segButtons($("yearSeg"), state.site.years.map((y) => [y.year, String(y.year)]), state.year, setYear);
+    drawBanner(); drawTiles(); drawChart(); drawTable();
+    if (siteChanged) drawTanks(true); else restyle();
+    drawTank();
+  }
+
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { drawChart(); drawTank(); }, 120); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (state.base === "map") { map.removeLayer(baseLayer); baseLayer = bases.map().addTo(map); baseLayer.bringToBack(); } render(false); });
+
+  const qSite = new URLSearchParams(location.search).get("site");
+  setSite(D.sites.some((s) => s.id === qSite) ? qSite : D.sites[0].id);
+  const qYear = Number(new URLSearchParams(location.search).get("year"));
+  if (state.site.years.some((y) => y.year === qYear)) setYear(qYear);
+})();
+</script>
+</body>
+</html>

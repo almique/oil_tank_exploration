@@ -97,6 +97,18 @@ def _run_length(profile: np.ndarray, t: np.ndarray, start: float, tol: float) ->
     return None
 
 
+def roof_texture(chip: np.ndarray, cx: float, cy: float, r: float, gsd: float) -> float:
+    """Std of ~1 m high-pass brightness inside 0.6 r. Floating roofs (drains, patches) are textured;
+    fixed cone/dome roofs are smooth. Only meaningful at sub-metre GSD."""
+    b = brightness(chip)
+    yy, xx = np.mgrid[: b.shape[0], : b.shape[1]]
+    inner = (xx - cx) ** 2 + (yy - cy) ** 2 < (0.6 * r) ** 2
+    if inner.sum() < 50:
+        return float("nan")
+    hp = b - gaussian_filter(b, max(1.0, 0.9 / gsd))
+    return float(np.std(hp[inner]))
+
+
 def _rise(prof: np.ndarray, t: np.ndarray, lo: float, hi: float) -> tuple[float, float, float] | None:
     """Strongest rising edge of `prof` for t in [lo, hi].
 

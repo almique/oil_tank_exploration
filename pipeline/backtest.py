@@ -15,7 +15,33 @@ import pandas as pd
 from . import ground_truth, shadow
 from .debug import load, tile_directions
 
-FLOATING_MIN_LIN_M = 1.5
+FLOATING_MIN_LIN_M = 1.5      # inner shadow longer than this => roof sits below the rim
+SMOOTH_TEX = 4.0              # roof texture below this => fixed (cone/dome) roof
+TEXTURED = 8.0                # roof texture above this => floating roof even if never seen below rim
+SUBMETRE = 0.75               # only trust inner-shadow / texture evidence at GSD <= this
+
+
+def roof_textures(chips_root: Path) -> pd.Series:
+    """Roof texture per tank from the finest-resolution year available."""
+    years = sorted((p for p in chips_root.iterdir() if p.is_dir() and p.name.isdigit()), key=lambda p: p.name)
+    tex = {}
+    for yd in reversed(years):
+        for c in load(yd):
+            if c["gsd"] > SUBMETRE or int(c["osm_id"]) in tex:
+                continue
+            tex[int(c["osm_id"])] = shadow.roof_texture(c["chip"], c["cx"], c["cy"], c["r"], c["gsd"])
+        if tex:
+            break
+    return pd.Series(tex, name="texture")
+
+
+def classify_floating(per_tank: pd.DataFrame, texture: pd.Series) -> set[int]:
+    hi = per_tank[per_tank.ok & (per_tank.gsd <= SUBMETRE)]
+    lin = hi.groupby("osm_id").l_in_m.max()
+    d = pd.concat([lin.rename("lin"), texture], axis=1)
+    shadow_seen = d.lin > FLOATING_MIN_LIN_M
+    floating = (d.texture >= TEXTURED) | (shadow_seen & ~(d.texture < SMOOTH_TEX))
+    return set(d.index[floating.fillna(False)])
 
 
 def _measure_one(args):
@@ -72,8 +98,13 @@ def main():
         print(f"{yd.name}: {len(df)} chips, ok={int(df.ok.sum())}", flush=True)
         frames.append(df)
     per_tank = pd.concat(frames, ignore_index=True)
-    lin = per_tank[per_tank.ok].groupby("osm_id").l_in_m.max()
-    floating = set(lin[lin > FLOATING_MIN_LIN_M].index)
+    tex_cache = out / "roof_texture.csv"
+    if tex_cache.exists():
+        texture = pd.read_csv(tex_cache, index_col=0)["texture"]
+    else:
+        texture = roof_textures(Path(a.chips))
+        texture.to_csv(tex_cache)
+    floating = classify_floating(per_tank, texture)
     print(f"floating-roof tanks: {len(floating)} of {per_tank.osm_id.nunique()}")
     f = fleet(per_tank, floating)
     eia = ground_truth.eia_weekly(cache=Path("data/raw/eia_cushing.xls"))

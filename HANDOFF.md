@@ -89,7 +89,6 @@ raw stocks vs fill gives r = 0.39.
 Known issues:
 - 1 m years read ~+0.09 high in 2010/2013 (inner shadow harder to see; 2013 flown near noon, outer
   shadow only ~4.5 m).
-- Floating-roof classification (`max L_in > 1.5 m` over all years) is loose: 332 of 402 tanks.
 - Shadow direction is estimated per tile from dark mass outside tanks; tiles of one flight disagree by ~12 deg.
 - NAIP relief displacement makes some shell walls visible, which inflates `L_out`.
 
@@ -122,8 +121,8 @@ pip install pystac-client planetary-computer numpy pandas scipy shapely pyproj r
 
 1. ~~Security cleanup~~ done (2026-11-07).
 2. ~~Validate the shadow method on Cushing NAIP 2023~~ done (edge-based rewrite, see Results).
-3. **Classify floating vs fixed roof:** currently `max L_in > 1.5 m` over all years (too loose, 332/402).
-   Use only the sub-metre years (2019-2023) and/or roof texture. Fixed roofs otherwise read as "100% full".
+3. ~~Classify floating vs fixed roof~~ done: floating if roof texture >= 8, or an inner shadow > 1.5 m in a
+   sub-metre year and texture not < 4 (`backtest.classify_floating`). 335/402 at Cushing. Backtest r=0.89, MAE 0.053.
 4. **Handle tanks that didn't exist yet** in older years: require a detected outer shadow
    (`ok == True`) before counting a tank.
 5. ~~Backtest~~ first pass done (r=0.88 vs utilization over 7 dates). Rerun after steps 3-4.

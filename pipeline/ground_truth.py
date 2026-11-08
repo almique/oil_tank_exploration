@@ -1,6 +1,7 @@
 """Free ground truth: EIA weekly Cushing crude stocks (no API key needed)."""
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pandas as pd
@@ -17,7 +18,7 @@ def eia_weekly(series: str = CUSHING, cache: Path | None = None) -> pd.Series:
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_bytes(r.content)
-        src = r.content if cache is None else cache
+        src = io.BytesIO(r.content) if cache is None else cache
     else:
         src = cache
     df = pd.read_excel(src, sheet_name="Data 1", skiprows=2)
@@ -40,22 +41,25 @@ EIA_CAPACITY_XLSX = "https://www.eia.gov/petroleum/storagecapacity/crudeoilstora
 
 
 def cushing_working_capacity(cache: Path | None = None) -> pd.Series:
-    """Cushing tank working storage capacity, thousand bbl, semiannual/annual 2011-03 .. 2024-03.
+    """Cushing tank working storage capacity, thousand bbl, semiannual/annual 2011-03 .. 2024-03."""
+    return working_capacity("Cushing", "Tank Working Storage Capacity", cache)
 
-    From EIA's discontinued Working and Net Available Shell Storage Capacity report.
-    """
+
+def working_capacity(sheet: str, row_name: str, cache: Path | None = None) -> pd.Series:
+    """One working-capacity row from EIA's discontinued Working and Net Available Shell Storage
+    Capacity report (crudeoilstorage.xlsx), thousand bbl, 2011-03 .. 2024-03."""
     if cache is None or not cache.exists():
         r = requests.get(EIA_CAPACITY_XLSX, timeout=60)
         r.raise_for_status()
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_bytes(r.content)
-        src = r.content if cache is None else cache
+        src = io.BytesIO(r.content) if cache is None else cache
     else:
         src = cache
-    raw = pd.read_excel(src, sheet_name="Cushing", header=None)
+    raw = pd.read_excel(src, sheet_name=sheet, header=None)
     dates = pd.to_datetime(raw.iloc[3, 1:], errors="coerce")
-    row = raw[raw[0].astype(str).str.strip() == "Tank Working Storage Capacity"].iloc[0, 1:]
+    row = raw[raw[0].astype(str).str.strip() == row_name].iloc[0, 1:]
     s = pd.Series(pd.to_numeric(row.values, errors="coerce"), index=dates).dropna()
     return s[s.index.notna()].sort_index()
 

@@ -101,12 +101,13 @@ roof ~225). `shadow.measure` now finds the strongest rising brightness edge afte
 | File | Purpose |
 |---|---|
 | `pipeline/tanks.py` | OSM fetch and diameter/circularity filter (402 Cushing tanks). |
-| `pipeline/ground_truth.py` | EIA weekly Cushing stocks, Cushing working capacity, utilization at a date. |
+| `pipeline/sites.py` | Site registry: bbox + EIA stocks series + capacity row (cushing, houston, corpus_christi). |
+| `pipeline/ground_truth.py` | EIA weekly stocks, working capacity from the EIA storage report, utilization at a date. |
 | `pipeline/shadow.py` | Edge-based fill-from-shadow measurement per tank chip. |
 | `pipeline/naip.py` | NAIP STAC search, chip extraction per tank, per-tile measurement. |
-| `pipeline/cache_chips.py` | `python -m pipeline.cache_chips --year 2023` caches chips to `data/chips/<year>/` (~2-3 min/year; 2023 is 600 MB). |
-| `pipeline/debug.py` | `python -m pipeline.debug data/chips/2023 --out data/debug/x.png`: overlays, stats, repeatability on overlapping tiles. |
-| `pipeline/backtest.py` | `python -m pipeline.backtest data/chips`: all years, floating classification, fleet fill vs EIA. Caches `data/backtest/per_tank_<year>.csv`; delete those after changing `shadow.py`. |
+| `pipeline/cache_chips.py` | `python -m pipeline.cache_chips --site cushing --year 2023` caches chips to `data/chips/<site>/<year>/` (~2-3 min/year; 2023 is 600 MB). |
+| `pipeline/debug.py` | `python -m pipeline.debug data/chips/cushing/2023 --out data/debug/x.png`: overlays, stats, repeatability on overlapping tiles. |
+| `pipeline/backtest.py` | `python -m pipeline.backtest --site cushing`: all years, floating classification, fleet fill vs EIA. Caches `data/backtest/<site>/per_tank_<year>.csv` and `roof_texture.csv`; delete those after changing `shadow.py`. |
 
 `data/` is gitignored; everything in it can be regenerated.
 

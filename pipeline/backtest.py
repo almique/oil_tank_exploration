@@ -1,6 +1,6 @@
 """Backtest fleet fill from cached NAIP chips against EIA Cushing stocks.
 
-    python -m pipeline.backtest data/chips --out data/backtest
+    python -m pipeline.backtest --site cushing
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import pandas as pd
 
 from . import ground_truth, shadow
 from .debug import load, tile_directions
+from .sites import SITES
 
 FLOATING_MIN_LIN_M = 1.5      # inner shadow longer than this => roof sits below the rim
 SMOOTH_TEX = 4.0              # roof texture below this => fixed (cone/dome) roof
@@ -82,13 +83,16 @@ def fleet(per_tank: pd.DataFrame, floating_ids: set[int]) -> pd.DataFrame:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("chips", help="folder with one subfolder per year")
-    ap.add_argument("--out", default="data/backtest")
+    ap.add_argument("--site", default="cushing", choices=sorted(SITES))
+    ap.add_argument("--chips", default="data/chips", help="root; chips are read from <root>/<site>/<year>")
+    ap.add_argument("--out", default="data/backtest", help="root; results go to <root>/<site>")
     ap.add_argument("--workers", type=int, default=4)
     a = ap.parse_args()
-    out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
+    site = SITES[a.site]
+    chips_root = Path(a.chips) / site.name
+    out = Path(a.out) / site.name; out.mkdir(parents=True, exist_ok=True)
     frames = []
-    for yd in sorted(p for p in Path(a.chips).iterdir() if p.is_dir() and p.name.isdigit()):
+    for yd in sorted(p for p in chips_root.iterdir() if p.is_dir() and p.name.isdigit()):
         cache = out / f"per_tank_{yd.name}.csv"
         if cache.exists():
             df = pd.read_csv(cache)
@@ -102,14 +106,15 @@ def main():
     if tex_cache.exists():
         texture = pd.read_csv(tex_cache, index_col=0)["texture"]
     else:
-        texture = roof_textures(Path(a.chips))
+        texture = roof_textures(chips_root)
         texture.to_csv(tex_cache)
     floating = classify_floating(per_tank, texture)
     print(f"floating-roof tanks: {len(floating)} of {per_tank.osm_id.nunique()}")
     f = fleet(per_tank, floating)
-    eia = ground_truth.eia_weekly(cache=Path("data/raw/eia_cushing.xls"))
+    eia = ground_truth.eia_weekly(site.eia_stocks, cache=Path(f"data/raw/eia_{site.eia_stocks}.xls"))
     f["eia_kbbl"] = [ground_truth.value_at(eia, d) for d in f.date]
-    cap = ground_truth.cushing_working_capacity(cache=Path("data/raw/eia_crudeoilstorage.xlsx"))
+    cap = ground_truth.working_capacity(site.capacity_sheet, site.capacity_row,
+                                        cache=Path("data/raw/eia_crudeoilstorage.xlsx"))
     util = [ground_truth.utilization_at(eia, cap, d) for d in f.date]
     f["eia_util"] = [u for u, _ in util]
     f["cap_known"] = [k for _, k in util]

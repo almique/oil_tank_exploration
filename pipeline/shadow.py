@@ -20,7 +20,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.ndimage import map_coordinates, sobel
+from scipy.ndimage import gaussian_filter, map_coordinates, sobel
 
 
 @dataclass
@@ -97,30 +97,64 @@ def _run_length(profile: np.ndarray, t: np.ndarray, start: float, tol: float) ->
     return None
 
 
+def _rise(prof: np.ndarray, t: np.ndarray, lo: float, hi: float) -> tuple[float, float, float] | None:
+    """Strongest rising edge of `prof` for t in [lo, hi].
+
+    Returns (t_edge, mean_before, mean_after) or None if the window is empty.
+    """
+    sel = np.where((t >= lo) & (t <= hi))[0]
+    if len(sel) < 4:
+        return None
+    g = np.gradient(prof)
+    k = sel[np.argmax(g[sel])]
+    before = prof[sel[0]:k + 1]
+    after = prof[k + 1:k + 1 + max(4, len(before) // 2)]
+    if len(before) == 0 or len(after) == 0:
+        return None
+    return float(t[k]), float(before.mean()), float(after.mean())
+
+
 def measure(chip: np.ndarray, cx: float, cy: float, r: float, direction: float,
-            refine: bool = True) -> ShadowResult:
+            refine: bool = True, debug: dict | None = None, gsd: float = 0.3,
+            max_shadow_m: float = 35.0, rim_m: float = 0.6, contrast: float = 0.8) -> ShadowResult:
+    """Edge-based measurement along chords parallel to the shadow direction.
+
+    Inner shadow: from the sun-side rim (t=-h) to the strongest brightness rise on the roof.
+    Outer shadow: from the anti-sun rim (t=+h) to the strongest brightness rise on the ground.
+    A run only counts as shadow if it is clearly darker than what follows it (`contrast`).
+    """
     if refine:
         cx, cy, r = refine_circle(chip, cx, cy, r)
-    mask = shadow_mask(chip, cx, cy, r)
+    b = brightness(chip)
+    valid = (chip[:3] > 0).all(axis=0).astype(np.float32)
+    bs = gaussian_filter(b, 1.0)
+    if debug is not None:
+        debug.update(cx=cx, cy=cy, r=r)
     dx, dy = math.cos(direction), math.sin(direction)
     nx, ny = -dy, dx
     step = 0.5
-    t = np.arange(-2.2 * r, 2.8 * r, step)
-    tol = max(2.0, 0.08 * r)
+    t = np.arange(-1.2 * r, r + max_shadow_m / gsd + 5, step)
+    rim = rim_m / gsd
+    lmax = max_shadow_m / gsd
     l_in, l_out = [], []
     for s in np.linspace(-0.5 * r, 0.5 * r, 11):
         h = math.sqrt(r * r - s * s)
         xs = cx + s * nx + t * dx
         ys = cy + s * ny + t * dy
-        prof = map_coordinates(mask, [ys, xs], order=1, mode="constant", cval=0.0)
-        # inner run: starts at the sun-side rim (t = -h) and goes inward
-        li = _run_length(prof, t, -h, tol)
-        # outer run: starts at the anti-sun rim (t = +h) and goes outward
-        lo = _run_length(prof, t, h, tol)
-        if li is None or lo is None or lo < 2.0:
-            continue
-        # inner shadow cannot exceed the chord or the outer shadow by much
-        if li > 2 * h:
+        prof = map_coordinates(bs, [ys, xs], order=1, mode="constant", cval=0.0)
+        okv = map_coordinates(valid, [ys, xs], order=0, mode="constant", cval=0.0)
+        li = lo = None
+        if okv[(t >= -h) & (t <= h + lmax)].min() > 0:
+            ri = _rise(prof, t, -h + rim, -h + min(2 * h, lmax) - rim)
+            if ri is not None:
+                li = ri[0] + h if ri[1] < contrast * ri[2] else 0.0
+            ro = _rise(prof, t, h + rim, h + lmax)
+            if ro is not None and ro[1] < contrast * ro[2]:
+                lo = ro[0] - h
+        if debug is not None:
+            debug.setdefault("chords", []).append(
+                dict(s=s, h=h, li=li, lo=lo, x0=cx + s * nx, y0=cy + s * ny, dx=dx, dy=dy))
+        if li is None or lo is None or lo < 2 * rim:
             continue
         l_in.append(li)
         l_out.append(lo)
@@ -128,7 +162,7 @@ def measure(chip: np.ndarray, cx: float, cy: float, r: float, direction: float,
         return ShadowResult(None, float("nan"), float("nan"), len(l_out), cx, cy, r, False, "few valid chords")
     li, lo = float(np.median(l_in)), float(np.median(l_out))
     spread = float(np.subtract(*np.percentile(l_out, [75, 25])))
-    if spread > 0.35 * lo + 1.5:
+    if spread > 0.25 * lo + rim:
         return ShadowResult(None, li, lo, len(l_out), cx, cy, r, False, "inconsistent outer shadow")
     fill = float(np.clip(1.0 - li / lo, 0.0, 1.0))
     return ShadowResult(fill, li, lo, len(l_out), cx, cy, r, True)

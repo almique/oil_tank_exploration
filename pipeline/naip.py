@@ -33,16 +33,20 @@ def _circmean(a: np.ndarray, w: np.ndarray | None = None) -> float:
     return math.atan2((w * np.sin(a)).sum(), (w * np.cos(a)).sum())
 
 
-def _process_item(item, tanks: pd.DataFrame) -> list[dict]:
+def tanks_in_item(item, tanks: pd.DataFrame) -> pd.DataFrame:
     foot = shape(item.geometry)
-    sel = tanks[[foot.contains(Point(lo, la)) for la, lo in zip(tanks.lat, tanks.lon)]]
+    return tanks[[foot.contains(Point(lo, la)) for la, lo in zip(tanks.lat, tanks.lon)]]
+
+
+def extract_chips(item, tanks: pd.DataFrame) -> tuple[float, list[tuple]]:
+    """Return (gsd_m, [(tank_row, chip(3,h,w) uint8, cx_px, cy_px, r_px), ...])."""
+    sel = tanks_in_item(item, tanks)
     if sel.empty:
-        return []
-    out = []
+        return float("nan"), []
+    chips = []
     with rasterio.Env(**GDAL_ENV), rasterio.open(pc.sign(item.assets["image"].href)) as src:
         gsd = abs(src.transform.a)
         xs, ys = warp_transform("EPSG:4326", src.crs, list(sel.lon), list(sel.lat))
-        chips = []
         for (_, t), x, y in zip(sel.iterrows(), xs, ys):
             half = 3.0 * t.diameter_m / 2 + 15
             win = from_bounds(x - half, y - half, x + half, y + half, src.transform)
@@ -50,6 +54,14 @@ def _process_item(item, tanks: pd.DataFrame) -> list[dict]:
             wt = src.window_transform(win)
             col, row = ~wt * (x, y)
             chips.append((t, chip, col, row, t.diameter_m / 2 / gsd))
+    return gsd, chips
+
+
+def _process_item(item, tanks: pd.DataFrame) -> list[dict]:
+    gsd, chips = extract_chips(item, tanks)
+    if not chips:
+        return []
+    out = []
     # pass 1: per-tank shadow direction, then one consensus direction per image tile
     dirs, weights = [], []
     for t, chip, cx, cy, r in chips:
@@ -62,7 +74,7 @@ def _process_item(item, tanks: pd.DataFrame) -> list[dict]:
         return []
     direction = _circmean(np.array(dirs), np.array(weights, float))
     for t, chip, cx, cy, r in chips:
-        res = shadow.measure(chip, cx, cy, r, direction)
+        res = shadow.measure(chip, cx, cy, r, direction, gsd=gsd)
         out.append({
             "osm_id": t.osm_id, "item": item.id, "date": item.datetime.date().isoformat(),
             "year": item.datetime.year, "gsd_m": gsd, "diameter_m": t.diameter_m,
